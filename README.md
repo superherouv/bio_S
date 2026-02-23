@@ -74,6 +74,10 @@ python improved_delayed_phase_encoding.py \
 - `train/test_mean_active_ratio`
 - `train/test_mean_encode_ms`
 
+注意：
+- `--n-rf` 仅作用于 `cnn_feature` 通道（默认 25，与当前 CNN flatten 长度兼容）。
+- `intensity/edge` 通道会自动使用 `--rf-h * --rf-w` 作为编码 `n_rf`，因此当你改成 `--rf-h 4 --rf-w 4` 时不会再触发 `input length must be divisible by n_rf` 的维度错误。
+
 ---
 
 ## 4) 一键跑“调参 + 消融”

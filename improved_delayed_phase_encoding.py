@@ -18,7 +18,7 @@ import csv
 import os
 import pickle
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -265,6 +265,7 @@ def encode_single_image(
     rf_h: int,
     rf_w: int,
 ) -> Tuple[Dict[str, List[List[float]]], Dict[str, List[List[int]]], Dict[str, Dict[str, float]]]:
+    spatial_encoder = AdaptiveDelayPhaseEncoder(replace(encoder.cfg, n_rf=rf_h * rf_w))
     if not image_path.exists():
         raise FileNotFoundError(
             f"image not found: {image_path}. Check CSV path separators (\\ vs /) and dataset root."
@@ -284,7 +285,7 @@ def encode_single_image(
     channels = extract_channels(image)
     for name, channel in channels.items():
         flat = flatten_by_receptive_field(channel, m=rf_h, n=rf_w)
-        ch_spikes, ch_status, ch_stats = encoder.encode(flat)
+        ch_spikes, ch_status, ch_stats = spatial_encoder.encode(flat)
         spikes[name], status[name], stats[name] = ch_spikes, ch_status, ch_stats
 
     return spikes, status, stats
@@ -482,9 +483,9 @@ def run_single(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BNN/SNN 多通道自适应延迟相位编码 + 基线解码")
     parser.add_argument("--model", type=str, default="./modelpara.pth", help="CNN 权重路径")
-    parser.add_argument("--n-rf", type=int, default=25)
-    parser.add_argument("--rf-h", type=int, default=5)
-    parser.add_argument("--rf-w", type=int, default=5)
+    parser.add_argument("--n-rf", type=int, default=25, help="CNN 特征通道的编码神经元数（需整除 CNN flatten 长度）")
+    parser.add_argument("--rf-h", type=int, default=5, help="intensity/edge 通道感受野高度")
+    parser.add_argument("--rf-w", type=int, default=5, help="intensity/edge 通道感受野宽度")
     parser.add_argument("--event-threshold", type=float, default=0.08)
     parser.add_argument("--dataset-root", type=str, default="", help="数据集根目录（当 CSV 路径前缀与当前环境不一致时使用）")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="推理设备")

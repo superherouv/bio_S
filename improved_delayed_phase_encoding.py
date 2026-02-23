@@ -218,9 +218,42 @@ def maybe_plot(spikes: Dict[str, List[List[float]]], title: str = "多通道脉�
     plt.show()
 
 
+def _unwrap_checkpoint(raw: object) -> Dict[str, torch.Tensor]:
+    """兼容常见 checkpoint 结构并提取 state_dict。"""
+    if isinstance(raw, dict):
+        if "state_dict" in raw and isinstance(raw["state_dict"], dict):
+            return raw["state_dict"]
+        if "model_state_dict" in raw and isinstance(raw["model_state_dict"], dict):
+            return raw["model_state_dict"]
+        return raw
+    raise TypeError(f"Unsupported checkpoint format: {type(raw)!r}")
+
+
+def _strip_module_prefix(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    if not state_dict:
+        return state_dict
+    if all(k.startswith("module.") for k in state_dict.keys()):
+        return {k[len("module.") :]: v for k, v in state_dict.items()}
+    return state_dict
+
+
 def load_model(model_path: Path, device: torch.device) -> ETH_Network:
     net = ETH_Network().to(device).eval()
-    net.load_state_dict(torch.load(model_path, map_location=device))
+    checkpoint = torch.load(model_path, map_location=device)
+    state_dict = _strip_module_prefix(_unwrap_checkpoint(checkpoint))
+    load_result = net.load_state_dict(state_dict, strict=False)
+
+    if load_result.missing_keys:
+        raise RuntimeError(
+            "Missing required model weights: "
+            + ", ".join(load_result.missing_keys)
+            + ". Please check model architecture and checkpoint compatibility."
+        )
+    if load_result.unexpected_keys:
+        print(
+            "warning: ignoring unexpected checkpoint keys: "
+            + ", ".join(load_result.unexpected_keys)
+        )
     return net
 
 

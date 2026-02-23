@@ -265,6 +265,10 @@ def encode_single_image(
     rf_h: int,
     rf_w: int,
 ) -> Tuple[Dict[str, List[List[float]]], Dict[str, List[List[int]]], Dict[str, Dict[str, float]]]:
+    if not image_path.exists():
+        raise FileNotFoundError(
+            f"image not found: {image_path}. Check CSV path separators (\\ vs /) and dataset root."
+        )
     image = Image.open(image_path)
     tensor = transforms.ToTensor()(image.resize((68, 68))).unsqueeze(0).to(device)
     with torch.no_grad():
@@ -342,12 +346,28 @@ def compute_macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(f1s))
 
 
-def load_annotation_csv(csv_path: Path) -> List[Tuple[str, int]]:
-    rows: List[Tuple[str, int]] = []
+def resolve_dataset_image_path(raw_path: str, csv_path: Path) -> Path:
+    """规范化 CSV 中的图片路径，兼容 Windows 分隔符和相对路径。"""
+    normalized = raw_path.strip().strip('"').replace("\\", "/")
+    candidate = Path(normalized).expanduser()
+
+    if candidate.is_absolute():
+        candidates = [candidate]
+    else:
+        candidates = [Path.cwd() / candidate, csv_path.parent / candidate]
+
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+def load_annotation_csv(csv_path: Path) -> List[Tuple[Path, int]]:
+    rows: List[Tuple[Path, int]] = []
     with csv_path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            rows.append((row["path"], int(row["species"])))
+            rows.append((resolve_dataset_image_path(row["path"], csv_path), int(row["species"])))
     return rows
 
 
@@ -360,14 +380,14 @@ def run_dataset_eval(
     train_rows = load_annotation_csv(Path(args.train_csv))
     test_rows = load_annotation_csv(Path(args.test_csv))
 
-    def encode_rows(rows: List[Tuple[str, int]]) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    def encode_rows(rows: List[Tuple[Path, int]]) -> Tuple[np.ndarray, np.ndarray, float, float]:
         xs: List[np.ndarray] = []
         ys: List[int] = []
         active_ratios: List[float] = []
         elapsed: List[float] = []
         for p, y in rows:
             t0 = time.perf_counter()
-            spikes, _, stats = encode_single_image(Path(p), net, encoder, device, args.rf_h, args.rf_w)
+            spikes, _, stats = encode_single_image(p, net, encoder, device, args.rf_h, args.rf_w)
             elapsed.append((time.perf_counter() - t0) * 1000.0)
             xs.append(aggregate_spike_features(spikes, encoder.cfg.time_grid_ms))
             ys.append(y)

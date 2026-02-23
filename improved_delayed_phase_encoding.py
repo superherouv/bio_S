@@ -31,6 +31,16 @@ from PIL import Image
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
+def resolve_device(device_arg: str) -> torch.device:
+    if device_arg == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device_arg == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("--device cuda was set but CUDA is not available.")
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
 def _load_matplotlib():
     import matplotlib
     from matplotlib import pyplot as plt
@@ -208,9 +218,9 @@ def maybe_plot(spikes: Dict[str, List[List[float]]], title: str = "多通道脉�
     plt.show()
 
 
-def load_model(model_path: Path) -> ETH_Network:
-    net = ETH_Network().eval()
-    net.load_state_dict(torch.load(model_path, map_location="cpu"))
+def load_model(model_path: Path, device: torch.device) -> ETH_Network:
+    net = ETH_Network().to(device).eval()
+    net.load_state_dict(torch.load(model_path, map_location=device))
     return net
 
 
@@ -218,12 +228,14 @@ def encode_single_image(
     image_path: Path,
     net: ETH_Network,
     encoder: AdaptiveDelayPhaseEncoder,
+    device: torch.device,
     rf_h: int,
     rf_w: int,
 ) -> Tuple[Dict[str, List[List[float]]], Dict[str, List[List[int]]], Dict[str, Dict[str, float]]]:
     image = Image.open(image_path)
-    tensor = transforms.ToTensor()(image.resize((68, 68))).unsqueeze(0)
-    features = net(tensor).detach().numpy().reshape(-1).astype(np.float64)
+    tensor = transforms.ToTensor()(image.resize((68, 68))).unsqueeze(0).to(device)
+    with torch.no_grad():
+        features = net(tensor).detach().cpu().numpy().reshape(-1).astype(np.float64)
 
     spikes: Dict[str, List[List[float]]] = {}
     status: Dict[str, List[List[int]]] = {}
@@ -306,7 +318,12 @@ def load_annotation_csv(csv_path: Path) -> List[Tuple[str, int]]:
     return rows
 
 
-def run_dataset_eval(args: argparse.Namespace, encoder: AdaptiveDelayPhaseEncoder, net: ETH_Network) -> None:
+def run_dataset_eval(
+    args: argparse.Namespace,
+    encoder: AdaptiveDelayPhaseEncoder,
+    net: ETH_Network,
+    device: torch.device,
+) -> None:
     train_rows = load_annotation_csv(Path(args.train_csv))
     test_rows = load_annotation_csv(Path(args.test_csv))
 
@@ -317,7 +334,7 @@ def run_dataset_eval(args: argparse.Namespace, encoder: AdaptiveDelayPhaseEncode
         elapsed: List[float] = []
         for p, y in rows:
             t0 = time.perf_counter()
-            spikes, _, stats = encode_single_image(Path(p), net, encoder, args.rf_h, args.rf_w)
+            spikes, _, stats = encode_single_image(Path(p), net, encoder, device, args.rf_h, args.rf_w)
             elapsed.append((time.perf_counter() - t0) * 1000.0)
             xs.append(aggregate_spike_features(spikes, encoder.cfg.time_grid_ms))
             ys.append(y)
@@ -356,8 +373,13 @@ def run_dataset_eval(args: argparse.Namespace, encoder: AdaptiveDelayPhaseEncode
         print(f"saved metrics to: {out}")
 
 
-def run_single(args: argparse.Namespace, encoder: AdaptiveDelayPhaseEncoder, net: ETH_Network) -> None:
-    spikes, status, stats = encode_single_image(Path(args.image), net, encoder, args.rf_h, args.rf_w)
+def run_single(
+    args: argparse.Namespace,
+    encoder: AdaptiveDelayPhaseEncoder,
+    net: ETH_Network,
+    device: torch.device,
+) -> None:
+    spikes, status, stats = encode_single_image(Path(args.image), net, encoder, device, args.rf_h, args.rf_w)
     for channel_name, channel_stats in stats.items():
         print(f"[{channel_name}] active_ratio={channel_stats['active_ratio']:.3f}")
 
@@ -379,6 +401,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rf-h", type=int, default=5)
     parser.add_argument("--rf-w", type=int, default=5)
     parser.add_argument("--event-threshold", type=float, default=0.08)
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="推理设备")
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--save-spikes", type=str, default="")
     parser.add_argument("--save-metrics", type=str, default="")
@@ -395,19 +418,25 @@ def main() -> None:
     if not model_path.exists():
         raise FileNotFoundError(f"model not found: {model_path}")
 
+    device = resolve_device(args.device)
+    if device.type == "cuda":
+        print(f"using device: {device} ({torch.cuda.get_device_name(0)})")
+    else:
+        print(f"using device: {device}")
+
     cfg = EncoderConfig(n_rf=args.n_rf, event_threshold=args.event_threshold)
     encoder = AdaptiveDelayPhaseEncoder(cfg)
-    net = load_model(model_path)
+    net = load_model(model_path, device)
 
     if args.train_csv and args.test_csv:
-        run_dataset_eval(args, encoder, net)
+        run_dataset_eval(args, encoder, net, device)
         return
 
     if not args.image:
         raise ValueError("请提供 --image（单图模式）或同时提供 --train-csv / --test-csv（数据集模式）")
     if not Path(args.image).exists():
         raise FileNotFoundError(f"image not found: {args.image}")
-    run_single(args, encoder, net)
+    run_single(args, encoder, net, device)
 
 
 if __name__ == "__main__":

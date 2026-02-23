@@ -59,9 +59,13 @@ python improved_delayed_phase_encoding.py \
   --model ./modelpara.pth \
   --train-csv ./Species_train_annotation.csv \
   --test-csv ./Species_test_annotation.csv \
+  --dataset-root ./dataset \
   --event-threshold 0.08 \
   --save-metrics ./artifacts/metrics/exp_baseline.pkl
 ```
+
+> 如果 CSV 里的路径前缀与当前机器不一致（例如从另一台机器复制过来），请设置 `--dataset-root`。
+> 例如 CSV 行为 `./dataset/ETH3x100/...` 时，通常可传 `--dataset-root ./dataset`。
 
 输出指标：
 
@@ -69,6 +73,10 @@ python improved_delayed_phase_encoding.py \
 - `test_macro_f1`
 - `train/test_mean_active_ratio`
 - `train/test_mean_encode_ms`
+
+注意：
+- `--n-rf` 仅作用于 `cnn_feature` 通道（默认 25，与当前 CNN flatten 长度兼容）。
+- `intensity/edge` 通道会自动使用 `--rf-h * --rf-w` 作为编码 `n_rf`，因此当你改成 `--rf-h 4 --rf-w 4` 时不会再触发 `input length must be divisible by n_rf` 的维度错误。
 
 ---
 
@@ -78,6 +86,12 @@ python improved_delayed_phase_encoding.py \
 
 ```bash
 bash scripts/run_4090_experiments.sh
+```
+
+如需指定数据根目录，可在运行前设置环境变量：
+
+```bash
+DATASET_ROOT=./dataset bash scripts/run_4090_experiments.sh
 ```
 
 这个脚本会自动完成：

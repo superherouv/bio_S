@@ -18,9 +18,9 @@ import csv
 import os
 import pickle
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -265,6 +265,7 @@ def encode_single_image(
     rf_h: int,
     rf_w: int,
 ) -> Tuple[Dict[str, List[List[float]]], Dict[str, List[List[int]]], Dict[str, Dict[str, float]]]:
+    spatial_encoder = AdaptiveDelayPhaseEncoder(replace(encoder.cfg, n_rf=rf_h * rf_w))
     if not image_path.exists():
         raise FileNotFoundError(
             f"image not found: {image_path}. Check CSV path separators (\\ vs /) and dataset root."
@@ -284,7 +285,7 @@ def encode_single_image(
     channels = extract_channels(image)
     for name, channel in channels.items():
         flat = flatten_by_receptive_field(channel, m=rf_h, n=rf_w)
-        ch_spikes, ch_status, ch_stats = encoder.encode(flat)
+        ch_spikes, ch_status, ch_stats = spatial_encoder.encode(flat)
         spikes[name], status[name], stats[name] = ch_spikes, ch_status, ch_stats
 
     return spikes, status, stats
@@ -346,28 +347,49 @@ def compute_macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(f1s))
 
 
-def resolve_dataset_image_path(raw_path: str, csv_path: Path) -> Path:
-    """规范化 CSV 中的图片路径，兼容 Windows 分隔符和相对路径。"""
+def resolve_dataset_image_path(raw_path: str, csv_path: Path, dataset_root: Optional[Path] = None) -> Path:
+    """规范化 CSV 中的图片路径，兼容 Windows 分隔符、相对路径和可选数据根目录。"""
     normalized = raw_path.strip().strip('"').replace("\\", "/")
     candidate = Path(normalized).expanduser()
 
+    candidates: List[Path] = []
     if candidate.is_absolute():
-        candidates = [candidate]
+        candidates.append(candidate)
     else:
-        candidates = [Path.cwd() / candidate, csv_path.parent / candidate]
+        candidates.extend([Path.cwd() / candidate, csv_path.parent / candidate])
 
-    for path in candidates:
+    if dataset_root is not None:
+        root = dataset_root.expanduser()
+        raw_parts = [part for part in normalized.lstrip("./").split("/") if part]
+        if raw_parts:
+            candidates.append(root / Path(*raw_parts))
+
+            if raw_parts[:2] == ["dataset", "ETH3x100"] and len(raw_parts) > 2:
+                candidates.append(root / "ETH3x100" / Path(*raw_parts[2:]))
+
+            if raw_parts[0] == "ETH3x100" and len(raw_parts) > 1:
+                candidates.append(root / Path(*raw_parts[1:]))
+
+    seen = set()
+    unique_candidates: List[Path] = []
+    for cand in candidates:
+        key = str(cand)
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append(cand)
+
+    for path in unique_candidates:
         if path.exists():
             return path
-    return candidates[0]
+    return unique_candidates[0]
 
 
-def load_annotation_csv(csv_path: Path) -> List[Tuple[Path, int]]:
+def load_annotation_csv(csv_path: Path, dataset_root: Optional[Path] = None) -> List[Tuple[Path, int]]:
     rows: List[Tuple[Path, int]] = []
     with csv_path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            rows.append((resolve_dataset_image_path(row["path"], csv_path), int(row["species"])))
+            rows.append((resolve_dataset_image_path(row["path"], csv_path, dataset_root), int(row["species"])))
     return rows
 
 
@@ -377,8 +399,19 @@ def run_dataset_eval(
     net: ETH_Network,
     device: torch.device,
 ) -> None:
-    train_rows = load_annotation_csv(Path(args.train_csv))
-    test_rows = load_annotation_csv(Path(args.test_csv))
+    train_rows = load_annotation_csv(Path(args.train_csv), Path(args.dataset_root) if args.dataset_root else None)
+    test_rows = load_annotation_csv(Path(args.test_csv), Path(args.dataset_root) if args.dataset_root else None)
+
+    missing_train = [str(p) for p, _ in train_rows if not p.exists()]
+    missing_test = [str(p) for p, _ in test_rows if not p.exists()]
+    if missing_train or missing_test:
+        preview = (missing_train + missing_test)[:5]
+        raise FileNotFoundError(
+            "Dataset image files are missing. "
+            f"missing_train={len(missing_train)}, missing_test={len(missing_test)}. "
+            f"Examples: {preview}. "
+            "If your dataset folder is mounted elsewhere, set --dataset-root to that folder."
+        )
 
     def encode_rows(rows: List[Tuple[Path, int]]) -> Tuple[np.ndarray, np.ndarray, float, float]:
         xs: List[np.ndarray] = []
@@ -450,10 +483,11 @@ def run_single(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BNN/SNN 多通道自适应延迟相位编码 + 基线解码")
     parser.add_argument("--model", type=str, default="./modelpara.pth", help="CNN 权重路径")
-    parser.add_argument("--n-rf", type=int, default=25)
-    parser.add_argument("--rf-h", type=int, default=5)
-    parser.add_argument("--rf-w", type=int, default=5)
+    parser.add_argument("--n-rf", type=int, default=25, help="CNN 特征通道的编码神经元数（需整除 CNN flatten 长度）")
+    parser.add_argument("--rf-h", type=int, default=5, help="intensity/edge 通道感受野高度")
+    parser.add_argument("--rf-w", type=int, default=5, help="intensity/edge 通道感受野宽度")
     parser.add_argument("--event-threshold", type=float, default=0.08)
+    parser.add_argument("--dataset-root", type=str, default="", help="数据集根目录（当 CSV 路径前缀与当前环境不一致时使用）")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="推理设备")
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--save-spikes", type=str, default="")

@@ -1,328 +1,414 @@
-'''
-这个代码用来将单个文件（也就是单张图片）转换成脉冲序列
-'''
-import os
+"""改进版延迟相位编码与基线解码评估。
 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+实现目标：
+1) 多通道编码（CNN 特征 + 强度 + 边缘）。
+2) 自适应延迟相位编码 + 事件驱动门控。
+3) STDP 离线更新函数。
+4) 批量评估：对 annotation CSV 执行编码 -> 特征聚合 -> 原型分类器解码。
+
+说明：
+- 单图模式：输出脉冲与统计信息。
+- 数据集模式：输出 accuracy / macro-f1 / spike 稀疏度 / 处理时延。
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import os
 import pickle
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Sequence, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-import numpy as np
-import matplotlib
-from matplotlib import pyplot as plt
 from PIL import Image
-import re
 
-# 设置plot中文字体
-font = {'family': 'MicroSoft YaHei',
-        'weight': 'bold',
-        'size': '10'}
-matplotlib.rc("font", **font)
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
-# 初始化卷积神经网络
+def _load_matplotlib():
+    import matplotlib
+    from matplotlib import pyplot as plt
+
+    font = {"family": "MicroSoft YaHei", "weight": "bold", "size": "10"}
+    matplotlib.rc("font", **font)
+    return plt
+
+
 class ETH_Network(nn.Module):
-    def __init__(self):
-        super(ETH_Network, self).__init__()  # 3x68x68
+    """ETH-80 小型 CNN 特征提取器（仅卷积部分）。"""
 
-        self.conv1 = nn.Conv2d(3, 12, kernel_size=5, padding=0)  # 卷积层12x64x64
-        self.relu1 = nn.ReLU()  # 激活函数ReLU
-        self.pool1 = nn.MaxPool2d(2, stride=2)  # 最大池化层12x32x32
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 12, kernel_size=5, padding=0)
+        self.relu1 = nn.ReLU()
+        self.pool1 = nn.MaxPool2d(2, stride=2)
 
-        self.conv2 = nn.Conv2d(12, 14, kernel_size=5, padding=0)  # 卷积层14x28x28
-        self.relu2 = nn.ReLU()  # 激活函数ReLU
-        self.pool2 = nn.MaxPool2d(2, stride=2)  # 最大池化层14x14x14
+        self.conv2 = nn.Conv2d(12, 14, kernel_size=5, padding=0)
+        self.relu2 = nn.ReLU()
+        self.pool2 = nn.MaxPool2d(2, stride=2)
 
-        self.conv3 = nn.Conv2d(14, 8, kernel_size=5, padding=0)  # 卷积层16x10x10
-        self.relu3 = nn.ReLU()  # 激活函数ReLU
-        self.pool3 = nn.MaxPool2d(2, stride=2)  # 最大池化层16x5x5
+        self.conv3 = nn.Conv2d(14, 8, kernel_size=5, padding=0)
+        self.relu3 = nn.ReLU()
+        self.pool3 = nn.MaxPool2d(2, stride=2)
 
-        self.fc4 = nn.Linear(5 * 5 * 8, 3)  # 全连接层
-        self.softmax4 = nn.Softmax(dim=1)  # Softmax层
-
-    # 前向传播
-    def forward(self, input1):  # input1=(1,1,28,28)
-        x = self.conv1(input1)
-        x = self.relu1(x)
-        x = self.pool1(x)
-
-        x = self.conv2(x)
-        x = self.relu2(x)
-        x = self.pool2(x)
-
-        x = self.conv3(x)
-        x = self.relu3(x)
-        x = self.pool3(x)
-
-        print(x.shape)
-
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.pool1(self.relu1(self.conv1(x)))
+        x = self.pool2(self.relu2(self.conv2(x)))
+        x = self.pool3(self.relu3(self.conv3(x)))
         return x
 
 
-class DelayPhaseEncoder:
-
-    def __init__(self, n_rf, t_max=1., alpha=1., amp=1., freq=40., phi_0=0., delta_phi=None):
-        self.n_rf = n_rf
-        self.t_max = t_max
-        self.alpha = alpha
-        self.amp = amp
-        self.freq = freq
-        self.phi_o = phi_0
-        if delta_phi is None:
-            self.delta_phi = 2 * np.pi / n_rf
-        else:
-            self.delta_phi = delta_phi
-
-    @property
-    def n_rf(self):
-        return self._n_rf
-
-    @n_rf.setter
-    def n_rf(self, new_nrf):
-        assert isinstance(new_nrf, (int, float)), "'n_rf' must be of type int or float."
-        self._n_rf = new_nrf
-
-    @property
-    def t_max(self):
-        return self._t_max
-
-    @t_max.setter
-    def t_max(self, new_tmax):
-        assert isinstance(new_tmax, float), "'t_max' must be of type float."
-        self._t_max = new_tmax
-
-    @property
-    def alpha(self):
-        return self._alpha
-
-    @alpha.setter
-    def alpha(self, new_alpha):
-        assert isinstance(new_alpha, float), "'alpha' must be of type float."
-        self._alpha = new_alpha
-
-    @property
-    def amp(self):
-        return self._amp
-
-    @amp.setter
-    def amp(self, new_amp):
-        assert isinstance(new_amp, float), "'amp' must be of type float."
-        self._amp = new_amp
-
-    @property
-    def freq(self):
-        return self._freq
-
-    @freq.setter
-    def freq(self, new_freq):
-        assert isinstance(new_freq, (int, float)), "'freq' must be of type int or float."
-        self._freq = new_freq
-
-    @property
-    def phi_0(self):
-        return self._phi_0
-
-    @phi_0.setter
-    def phi_0(self, new_phi0):
-        assert isinstance(new_phi0, float), "'phi_0' must be of type float"
-        self._phi_0 = new_phi0
-
-    @property
-    def delta_phi(self):
-        return self._delta_phi
-
-    @delta_phi.setter
-    def delta_phi(self, new_deltaphi):
-        assert isinstance(new_deltaphi, float), "'delta_phi' must be of type float."
-        self._delta_phi = new_deltaphi
-
-    def encode(self, input_array):
-
-        assert isinstance(input_array, np.ndarray), "'input_array' must be of type np.ndarray"
-        assert input_array.ndim == 1, "'input_array' must be 1-d tensor"  # 秩或维度的个数必須為1
-        assert input_array.shape[0] % self.n_rf == 0, "'input_array' dimensionality should match with n_rf."
-        assert input_array.dtype == np.float64, "'input_array' must be of dtype np.float64"
-        g_cell = GanglionCell(n_rf=self.n_rf, t_max=self.t_max, alpha=self.alpha, amp=self.amp,
-                              freq=self.freq, phi_0=self.phi_o, delta_phi=self.delta_phi)
-        n_input = input_array.shape[0]  # n_input表示所有像素的数量
-        ganshouyedeshumu = (n_input / self.n_rf)  # 感受野的数目，即神经元的数目
-        fields = np.split(input_array, ganshouyedeshumu)  # 均等分割
-        encoded = list()
-        for row in fields:
-            encoded.append(g_cell.encode(stimulation=row))
-
-        # 找到整个大列表中的最小值
-        min_value = min(min(item) for item in encoded)
-        # 对大列表中的每个元素进行操作
-        encoded = [[(x - min_value) for x in item] for item in encoded]  # 让时间序列没有负的值
-
-        # 找到整个大列表中的最大值
-        max_value = max(max(item) for item in encoded)
-        # 对大列表中的每个元素进行操作
-        encoded = [[(x / max_value) * 1000 * 2 for x in item] for item in encoded]  # 我在这里乘以了两倍，也就是tmax
-
-        arithmetic_sequence = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800]
-        for sublist_index, sublist in enumerate(encoded):
-            # 遍历小列表中的每个元素并替换
-            for i, element in enumerate(sublist):
-                closest_value = min(arithmetic_sequence, key=lambda x: abs(x - element))
-                encoded[sublist_index][i] = closest_value
-
-        list1 = []  # 8x100 这个list1是由0和1组成的矩阵
-        for i in range(len(encoded)):
-            list1.append(arithmetic_sequence.copy())
-            for item_index, item in enumerate(list1[i]):
-                if item in encoded[i]:
-                    list1[i][item_index] = 1
-                else:
-                    list1[i][item_index] = 0
-
-        for sublist in encoded:
-            for i in range(len(sublist)):
-                sublist[i] = np.float64(sublist[i])  # 转化为保留两位小数
-
-        # 去除每个小列表中的重复元素
-        encoded = [list(set(small_list)) for small_list in encoded]
-
-        plt.figure(figsize=(10, 5))
-
-        plt.style.use('ggplot')
-        plt.eventplot(encoded, linelengths=0.8, linewidths=2.5, colors='blue')  # 绘制相同的平行线
-        plt.yticks(np.arange(0, len(encoded), 1))  # 指定坐标轴的刻度,往下移-0.3
-        plt.xticks(np.arange(0, 2001, 200))  # 指定坐标轴的刻度,1000毫秒
-        plt.xlabel('time(ms)')
-        plt.ylabel('neuron number')
-        # plt.title('编码后的脉冲刺激序列')
-        plt.grid(color='black', axis='y')
-
-        plt.show()
-        return encoded, list1
-
-
-class ImageProcessing:
-    def __init__(self, n_rf, m, n):
-        self.n_rf = n_rf
-        self.m = m
-        self.n = n
-
-    def ImageProcess(self, Image):
-
-        """将图像分成各个感受野RF，
-
-        RF中像素数量为n_rf
-
-        """
-        assert (Image.shape[0] * Image.shape[
-            1]) % self.n_rf == 0, "'input_array' dimensionality should match with n_rf."
-        Image_1d = list()
-        for i in range(0, Image.shape[0], self.m):
-            for j in range(0, Image.shape[1], self.n):
-                for s in range(0, self.m):
-                    Image_1d.extend(Image[i + s, j:j + self.n])
-
-        return np.array(Image_1d) / 255
-
-
-class GanglionCell:
-    def __init__(self, n_rf, t_max=1., alpha=1., amp=1., freq=40., phi_0=0., delta_phi=None):
-        self.n_rf = n_rf
-        self.t_max = t_max
-        self.alpha = alpha
-        self.amp = amp
-        self.freq = freq
-        self.omega = 2 * np.pi * freq
-        self.phi_0 = phi_0
-        if delta_phi is None:
-            self.delta_phi = 2 * np.pi / n_rf
-        else:
-            self.delta_phi = delta_phi
-
-    def encode(self, stimulation):  # 输入的是单个感受野的所有像素点
-        """Encode input stimulation.
-        Args
-        ----
-        stimulation (:obj: np.ndarray): Must be of of shape (n_rf,) .
-        :returns :obj: np.array of shape(n_rf,) and dtype int64
-        """
-        receptive_field = [PhotoReceptor(t_max=self.t_max, alpha=self.alpha) for _ in range(self.n_rf)]
-        # 整个列表推导式的目的是创建一个包含self.n_rf个PhotoReceptor对象的列表，并将这些对象存储在receptive_field变量中。
-        out_spike_times = np.zeros(self.n_rf, dtype=np.float64)
-        for (ind, intensity) in enumerate(stimulation):  # enumerate()可以同时获得索引和值
-            pr_spike_time = (receptive_field[ind].get_spike_time(intensity=intensity) * 1000).astype(np.int64)  # 以毫秒为单位
-            out_spike_times[ind] = pr_spike_time
-
-        # --------时间偏移-----------
-        for (id, spike) in enumerate(out_spike_times):
-            if id != 0:
-                out_spike_times[id] = spike + 10 / self.n_rf * id
-            if id == 0:
-                out_spike_times[id] = spike
-        # -----------------------------------------
-
-        return out_spike_times
-
-
 class PhotoReceptor:
-    def __init__(self, t_max, alpha):
-        """
-        unit.
+    def __init__(self, t_max: float, alpha: float) -> None:
+        self.t_max = float(t_max)
+        self.alpha = float(alpha)
 
-        Args
-        ----
-        t_max (float): Max output interval is seconds.
-        alpha (float): Scaling factor used in logarithmic transformation function.
-
-        """
-        assert isinstance(t_max, float)
-        assert isinstance(alpha, float)
-        self.t_max = t_max
-        self.alpha = alpha
-
-    def get_spike_time(self, intensity):  # intensity表示输入的一个像素值
-        """以秒为单位返回尖峰时间.
-        intensity (float): 浮点数并且标准化分布.
-        :以秒为单位返回浮点型的峰值时间.
-        """
-        assert isinstance(intensity, float), "'intensity' must be of type float"  # 检查对象是否是另一个对象的子类
-        spike_time = self.t_max * (1 - np.arctan(1.557 * intensity))
-        return spike_time
+    def get_spike_time(self, intensity: float) -> float:
+        intensity = float(np.clip(intensity, 0.0, 1.0))
+        return self.t_max * (1.0 - np.arctan(1.557 * self.alpha * intensity))
 
 
-# 初始化神经网络
-net = ETH_Network()
+@dataclass
+class EncoderConfig:
+    n_rf: int = 25
+    t_max: float = 1.0
+    alpha: float = 1.0
+    base_delay_ms: float = 10.0
+    adaptive_min_scale: float = 0.7
+    adaptive_max_scale: float = 1.4
+    event_threshold: float = 0.08
+    time_grid_ms: Tuple[int, ...] = (0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800)
 
-net.load_state_dict(torch.load('.\modelpara.pth', map_location='cpu'))
 
-# 选取的 9 张图片文件名为： apple_13  apple_26  apple_65  car_51  car_56  car_78  cup_14  cup_41  cup_100
-#          论文中命名为： apple_1    apple_2   apple_3   car_1   car_2   car_3    cup1   cup2     cup3
-file_path = "./dataset/ETH3x100/apple/apple_65.png"
-# ETH测试集准确率测试
-img = Image.open(file_path)
-img_resized = img.resize((68, 68))
+class AdaptiveDelayPhaseEncoder:
+    def __init__(self, config: EncoderConfig) -> None:
+        self.cfg = config
 
-input_data = transforms.ToTensor()(img_resized).unsqueeze(0)  # Convert to tensor and add batch dimension
+    def _encode_receptive_field(self, stimulation: np.ndarray, t_scale: float) -> np.ndarray:
+        receptors = [PhotoReceptor(t_max=self.cfg.t_max * t_scale, alpha=self.cfg.alpha) for _ in range(self.cfg.n_rf)]
+        spike_ms = np.zeros(self.cfg.n_rf, dtype=np.float64)
+        for idx, intensity in enumerate(stimulation):
+            spike_ms[idx] = receptors[idx].get_spike_time(float(intensity)) * 1000.0
+        spike_ms += np.arange(self.cfg.n_rf, dtype=np.float64) * (self.cfg.base_delay_ms / self.cfg.n_rf)
+        return spike_ms
 
-n_rf = 25  # 表示感受野中的像素数量，即m*n
-m = 5  # 表示感受野的行数
-n = 5  # 表示感受野列数
+    def _normalize_and_discretize(self, encoded: List[np.ndarray]) -> Tuple[List[List[float]], List[List[int]]]:
+        stacked = np.vstack(encoded)
+        min_v, max_v = float(stacked.min()), float(stacked.max())
+        if np.isclose(max_v, min_v):
+            max_v = min_v + 1e-6
 
-output = net(input_data)
+        scaled = [((arr - min_v) / (max_v - min_v)) * max(self.cfg.time_grid_ms) for arr in encoded]
+        spike_lists: List[List[float]] = []
+        channel_status: List[List[int]] = []
+        for arr in scaled:
+            snapped = [float(min(self.cfg.time_grid_ms, key=lambda x: abs(x - t))) for t in arr]
+            uniq = sorted(set(snapped))
+            spike_lists.append(uniq)
+            channel_status.append([1 if t in uniq else 0 for t in self.cfg.time_grid_ms])
+        return spike_lists, channel_status
 
-print("Predicted Class:", output)
+    def encode(self, input_array: np.ndarray) -> Tuple[List[List[float]], List[List[int]], Dict[str, float]]:
+        if input_array.ndim != 1:
+            raise ValueError("input_array must be 1-D")
+        if input_array.size % self.cfg.n_rf != 0:
+            raise ValueError("input length must be divisible by n_rf")
 
-lazhi = output.view(-1)
-numpy_array = lazhi.detach().numpy()
-numpy_array = numpy_array.astype(np.float64)
+        fields = np.split(input_array.astype(np.float64), input_array.size // self.cfg.n_rf)
+        encoded: List[np.ndarray] = []
+        active_fields = 0
+        for field in fields:
+            if float(np.std(field)) < self.cfg.event_threshold:
+                encoded.append(np.zeros(self.cfg.n_rf, dtype=np.float64))
+                continue
+            active_fields += 1
+            mean_intensity = float(np.mean(field))
+            scale = self.cfg.adaptive_max_scale - (
+                self.cfg.adaptive_max_scale - self.cfg.adaptive_min_scale
+            ) * mean_intensity
+            encoded.append(self._encode_receptive_field(field, scale))
 
-encoder = DelayPhaseEncoder(n_rf)
-encoding, channelstatus = encoder.encode(input_array=numpy_array)
+        spikes, status = self._normalize_and_discretize(encoded)
+        stats = {
+            "active_fields": float(active_fields),
+            "active_ratio": float(active_fields / len(fields)),
+            "event_threshold": float(self.cfg.event_threshold),
+        }
+        return spikes, status, stats
 
-match = re.search(r'/([^/]+)\.png$', file_path)
 
-if match:
-    filename = match.group(1)
-    print(filename)  # 输出: car_344
+def extract_channels(image: Image.Image, target_size: Tuple[int, int] = (68, 68)) -> Dict[str, np.ndarray]:
+    img_rgb = image.convert("RGB").resize(target_size)
+    arr = np.asarray(img_rgb).astype(np.float64) / 255.0
 
-# with open(filename +'_ChannelStatus.pkl', 'wb') as f:
-#     pickle.dump(channelstatus, f)
+    gray = np.mean(arr, axis=2)
+    gx = np.zeros_like(gray)
+    gy = np.zeros_like(gray)
+    gx[:, 1:-1] = gray[:, 2:] - gray[:, :-2]
+    gy[1:-1, :] = gray[2:, :] - gray[:-2, :]
+    edge = np.sqrt(gx ** 2 + gy ** 2)
+    edge = edge / (edge.max() + 1e-8)
+    return {"intensity": gray, "edge": edge}
+
+
+def flatten_by_receptive_field(channel_2d: np.ndarray, m: int = 5, n: int = 5) -> np.ndarray:
+    if channel_2d.shape[0] % m != 0 or channel_2d.shape[1] % n != 0:
+        raise ValueError("image size must be divisible by receptive field size")
+    out: List[float] = []
+    for i in range(0, channel_2d.shape[0], m):
+        for j in range(0, channel_2d.shape[1], n):
+            out.extend(channel_2d[i : i + m, j : j + n].reshape(-1).tolist())
+    return np.asarray(out, dtype=np.float64)
+
+
+def stdp_update(
+    weights: np.ndarray,
+    pre_spike_ms: np.ndarray,
+    post_spike_ms: np.ndarray,
+    a_plus: float = 0.01,
+    a_minus: float = 0.012,
+    tau_plus: float = 20.0,
+    tau_minus: float = 20.0,
+) -> np.ndarray:
+    if weights.shape != (pre_spike_ms.size, post_spike_ms.size):
+        raise ValueError("weights shape must match [n_pre, n_post]")
+    updated = weights.copy().astype(np.float64)
+    for i, t_pre in enumerate(pre_spike_ms):
+        for j, t_post in enumerate(post_spike_ms):
+            dt = float(t_post - t_pre)
+            dw = a_plus * np.exp(-dt / tau_plus) if dt >= 0 else -a_minus * np.exp(dt / tau_minus)
+            updated[i, j] += dw
+    return np.clip(updated, 0.0, 1.0)
+
+
+def maybe_plot(spikes: Dict[str, List[List[float]]], title: str = "多通道脉冲编码") -> None:
+    plt = _load_matplotlib()
+    plt.figure(figsize=(11, 5))
+    plt.style.use("ggplot")
+    offset = 0
+    for _, spike_list in spikes.items():
+        plt.eventplot(
+            spike_list,
+            lineoffsets=np.arange(offset, offset + len(spike_list)),
+            linelengths=0.8,
+            linewidths=1.5,
+        )
+        offset += len(spike_list) + 1
+    plt.xticks(np.arange(0, 2001, 200))
+    plt.xlabel("time(ms)")
+    plt.ylabel("neuron index")
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
+
+
+def load_model(model_path: Path) -> ETH_Network:
+    net = ETH_Network().eval()
+    net.load_state_dict(torch.load(model_path, map_location="cpu"))
+    return net
+
+
+def encode_single_image(
+    image_path: Path,
+    net: ETH_Network,
+    encoder: AdaptiveDelayPhaseEncoder,
+    rf_h: int,
+    rf_w: int,
+) -> Tuple[Dict[str, List[List[float]]], Dict[str, List[List[int]]], Dict[str, Dict[str, float]]]:
+    image = Image.open(image_path)
+    tensor = transforms.ToTensor()(image.resize((68, 68))).unsqueeze(0)
+    features = net(tensor).detach().numpy().reshape(-1).astype(np.float64)
+
+    spikes: Dict[str, List[List[float]]] = {}
+    status: Dict[str, List[List[int]]] = {}
+    stats: Dict[str, Dict[str, float]] = {}
+
+    cnn_spikes, cnn_status, cnn_stats = encoder.encode(features)
+    spikes["cnn_feature"], status["cnn_feature"], stats["cnn_feature"] = cnn_spikes, cnn_status, cnn_stats
+
+    channels = extract_channels(image)
+    for name, channel in channels.items():
+        flat = flatten_by_receptive_field(channel, m=rf_h, n=rf_w)
+        ch_spikes, ch_status, ch_stats = encoder.encode(flat)
+        spikes[name], status[name], stats[name] = ch_spikes, ch_status, ch_stats
+
+    return spikes, status, stats
+
+
+def aggregate_spike_features(spikes: Dict[str, List[List[float]]], time_grid: Sequence[int]) -> np.ndarray:
+    """将脉冲序列聚合成可用于解码器的定长向量。
+
+    每个通道提取：
+    - mean spike count
+    - mean first-spike latency
+    - mean last-spike latency
+    - active neuron ratio
+    """
+    feats: List[float] = []
+    max_t = float(max(time_grid))
+    for _, neurons in sorted(spikes.items(), key=lambda kv: kv[0]):
+        counts = np.asarray([len(n) for n in neurons], dtype=np.float64)
+        first = np.asarray([n[0] if len(n) else max_t for n in neurons], dtype=np.float64)
+        last = np.asarray([n[-1] if len(n) else max_t for n in neurons], dtype=np.float64)
+        active = np.asarray([1.0 if len(n) else 0.0 for n in neurons], dtype=np.float64)
+
+        feats.extend([
+            float(np.mean(counts)),
+            float(np.mean(first)),
+            float(np.mean(last)),
+            float(np.mean(active)),
+        ])
+    return np.asarray(feats, dtype=np.float64)
+
+
+def fit_prototype_decoder(x_train: np.ndarray, y_train: np.ndarray) -> Dict[int, np.ndarray]:
+    prototypes: Dict[int, np.ndarray] = {}
+    for cls in sorted(set(y_train.tolist())):
+        prototypes[int(cls)] = np.mean(x_train[y_train == cls], axis=0)
+    return prototypes
+
+
+def predict_prototype_decoder(x_test: np.ndarray, prototypes: Dict[int, np.ndarray]) -> np.ndarray:
+    classes = sorted(prototypes.keys())
+    pred = []
+    for x in x_test:
+        dists = [float(np.linalg.norm(x - prototypes[c])) for c in classes]
+        pred.append(classes[int(np.argmin(dists))])
+    return np.asarray(pred, dtype=np.int64)
+
+
+def compute_macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    classes = sorted(set(y_true.tolist()))
+    f1s: List[float] = []
+    for c in classes:
+        tp = float(np.sum((y_true == c) & (y_pred == c)))
+        fp = float(np.sum((y_true != c) & (y_pred == c)))
+        fn = float(np.sum((y_true == c) & (y_pred != c)))
+        precision = tp / (tp + fp + 1e-12)
+        recall = tp / (tp + fn + 1e-12)
+        f1 = 2 * precision * recall / (precision + recall + 1e-12)
+        f1s.append(f1)
+    return float(np.mean(f1s))
+
+
+def load_annotation_csv(csv_path: Path) -> List[Tuple[str, int]]:
+    rows: List[Tuple[str, int]] = []
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append((row["path"], int(row["species"])))
+    return rows
+
+
+def run_dataset_eval(args: argparse.Namespace, encoder: AdaptiveDelayPhaseEncoder, net: ETH_Network) -> None:
+    train_rows = load_annotation_csv(Path(args.train_csv))
+    test_rows = load_annotation_csv(Path(args.test_csv))
+
+    def encode_rows(rows: List[Tuple[str, int]]) -> Tuple[np.ndarray, np.ndarray, float, float]:
+        xs: List[np.ndarray] = []
+        ys: List[int] = []
+        active_ratios: List[float] = []
+        elapsed: List[float] = []
+        for p, y in rows:
+            t0 = time.perf_counter()
+            spikes, _, stats = encode_single_image(Path(p), net, encoder, args.rf_h, args.rf_w)
+            elapsed.append((time.perf_counter() - t0) * 1000.0)
+            xs.append(aggregate_spike_features(spikes, encoder.cfg.time_grid_ms))
+            ys.append(y)
+            active_ratios.append(float(np.mean([v["active_ratio"] for v in stats.values()])))
+        return np.vstack(xs), np.asarray(ys, dtype=np.int64), float(np.mean(active_ratios)), float(np.mean(elapsed))
+
+    x_train, y_train, train_active, train_ms = encode_rows(train_rows)
+    x_test, y_test, test_active, test_ms = encode_rows(test_rows)
+
+    prototypes = fit_prototype_decoder(x_train, y_train)
+    y_pred = predict_prototype_decoder(x_test, prototypes)
+
+    acc = float(np.mean(y_pred == y_test))
+    macro_f1 = compute_macro_f1(y_test, y_pred)
+
+    result = {
+        "test_accuracy": acc,
+        "test_macro_f1": macro_f1,
+        "train_mean_active_ratio": train_active,
+        "test_mean_active_ratio": test_active,
+        "train_mean_encode_ms": train_ms,
+        "test_mean_encode_ms": test_ms,
+        "n_train": int(len(y_train)),
+        "n_test": int(len(y_test)),
+    }
+
+    print("\n=== Dataset evaluation summary ===")
+    for k, v in result.items():
+        print(f"{k}: {v}")
+
+    if args.save_metrics:
+        out = Path(args.save_metrics)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("wb") as f:
+            pickle.dump(result, f)
+        print(f"saved metrics to: {out}")
+
+
+def run_single(args: argparse.Namespace, encoder: AdaptiveDelayPhaseEncoder, net: ETH_Network) -> None:
+    spikes, status, stats = encode_single_image(Path(args.image), net, encoder, args.rf_h, args.rf_w)
+    for channel_name, channel_stats in stats.items():
+        print(f"[{channel_name}] active_ratio={channel_stats['active_ratio']:.3f}")
+
+    if args.plot:
+        maybe_plot(spikes)
+
+    if args.save_spikes:
+        out = Path(args.save_spikes)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("wb") as f:
+            pickle.dump({"spikes": spikes, "channel_status": status, "stats": stats, "config": encoder.cfg}, f)
+        print(f"saved spikes to: {out}")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="BNN/SNN 多通道自适应延迟相位编码 + 基线解码")
+    parser.add_argument("--model", type=str, default="./modelpara.pth", help="CNN 权重路径")
+    parser.add_argument("--n-rf", type=int, default=25)
+    parser.add_argument("--rf-h", type=int, default=5)
+    parser.add_argument("--rf-w", type=int, default=5)
+    parser.add_argument("--event-threshold", type=float, default=0.08)
+    parser.add_argument("--plot", action="store_true")
+    parser.add_argument("--save-spikes", type=str, default="")
+    parser.add_argument("--save-metrics", type=str, default="")
+
+    parser.add_argument("--image", type=str, default="", help="单图模式输入")
+    parser.add_argument("--train-csv", type=str, default="", help="数据集模式 train annotation csv")
+    parser.add_argument("--test-csv", type=str, default="", help="数据集模式 test annotation csv")
+    return parser
+
+
+def main() -> None:
+    args = build_arg_parser().parse_args()
+    model_path = Path(args.model)
+    if not model_path.exists():
+        raise FileNotFoundError(f"model not found: {model_path}")
+
+    cfg = EncoderConfig(n_rf=args.n_rf, event_threshold=args.event_threshold)
+    encoder = AdaptiveDelayPhaseEncoder(cfg)
+    net = load_model(model_path)
+
+    if args.train_csv and args.test_csv:
+        run_dataset_eval(args, encoder, net)
+        return
+
+    if not args.image:
+        raise ValueError("请提供 --image（单图模式）或同时提供 --train-csv / --test-csv（数据集模式）")
+    if not Path(args.image).exists():
+        raise FileNotFoundError(f"image not found: {args.image}")
+    run_single(args, encoder, net)
+
+
+if __name__ == "__main__":
+    main()

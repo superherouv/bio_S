@@ -42,7 +42,7 @@ for thr in 0.00 0.02 0.05 0.08 0.12 0.16; do
 done
 
 # 3) RF ablation
-for rf in 4 5; do
+for rf in 4 8; do
   python improved_delayed_phase_encoding.py \
     --device auto \
     --model "$MODEL" \

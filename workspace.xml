@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="8d27b776-c5a0-4adb-9473-5aa3f9346b18" name="更改" comment="" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 3
+}</component>
+  <component name="ProjectId" id="2jaJ2eSVj7i7UWoe9gVQP6tfLot" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.11.executor&quot;: &quot;Run&quot;,
+    &quot;Python.20250217.executor&quot;: &quot;Run&quot;,
+    &quot;Python.Generate_CSV_files.executor&quot;: &quot;Run&quot;,
+    &quot;Python.HEnon_encoding3.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.Linear_fitting.executor&quot;: &quot;Run&quot;,
+    &quot;Python.MLp_9image.executor&quot;: &quot;Run&quot;,
+    &quot;Python.SNN_MyETH100.executor&quot;: &quot;Run&quot;,
+    &quot;Python.SNN_MyETH100GPT写的.executor&quot;: &quot;Run&quot;,
+    &quot;Python.Species_make_anno2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.Transformer_9image.executor&quot;: &quot;Run&quot;,
+    &quot;Python.cnn_9image.executor&quot;: &quot;Run&quot;,
+    &quot;Python.cnn_ETH_pytorch.executor&quot;: &quot;Run&quot;,
+    &quot;Python.cnn_ETH_pytorch_100.executor&quot;: &quot;Run&quot;,
+    &quot;Python.cnn_ETH_pytorch_100_训练好的卷积层.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.cnn_ETH_pytorch_9image.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.cnn_ETH_pytorch_CNNfenlei9zhangtupian.executor&quot;: &quot;Run&quot;,
+    &quot;Python.cnn_ETH_pytorch_type2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.creatcsv.executor&quot;: &quot;Run&quot;,
+    &quot;Python.snn.executor&quot;: &quot;Run&quot;,
+    &quot;Python.wxc4_cnn_ETH_pytorch.executor&quot;: &quot;Run&quot;,
+    &quot;Python.wxc4_cnn_ETH_pytorch_100.executor&quot;: &quot;Run&quot;,
+    &quot;Python.wxc4_cnn_ETH_pytorch_batch5_2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.wxc4_cnn_ETH_pytorch_batch7_2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.从ETH输出不同类别100图片.executor&quot;: &quot;Run&quot;,
+    &quot;Python.改变图片背景颜色.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/pycharm/PycharmProjects/CNN_Feature_extractor_training&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.fileTypes&quot;
+  }
+}</component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\pycharm\PycharmProjects\CNN_Feature_extractor_training" />
+      <recent name="D:\pycharm\PycharmProjects\CNN_ETH80_recognition_by_Pytorch-main" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Python.wxc4_cnn_ETH_pytorch_batch5_2">
+    <configuration name="Generate_CSV_files" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="CNN_ETH80_recognition_by_Pytorch-main" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/Generate_CSV_files.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="SNN_MyETH100" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="CNN_ETH80_recognition_by_Pytorch-main" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/SNN_MyETH100.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="cnn_ETH_pytorch_100" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="CNN_ETH80_recognition_by_Pytorch-main" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/cnn_ETH_pytorch_100.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="cnn_ETH_pytorch_100_训练好的卷积层" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="CNN_ETH80_recognition_by_Pytorch-main" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/cnn_ETH_pytorch_100_训练好的卷积层.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="wxc4_cnn_ETH_pytorch_batch5_2" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="CNN_ETH80_recognition_by_Pytorch-main" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/wxc4_cnn_ETH_pytorch_batch5_2.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.wxc4_cnn_ETH_pytorch_batch5_2" />
+        <item itemvalue="Python.cnn_ETH_pytorch_100" />
+        <item itemvalue="Python.Generate_CSV_files" />
+        <item itemvalue="Python.cnn_ETH_pytorch_100_训练好的卷积层" />
+        <item itemvalue="Python.SNN_MyETH100" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-d68999036c7f-d3b881c8e49f-com.jetbrains.pycharm.community.sharedIndexes.bundled-PC-233.14475.56" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="应用程序级" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="默认任务">
+      <changelist id="8d27b776-c5a0-4adb-9473-5aa3f9346b18" name="更改" comment="" />
+      <created>1721619048663</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1721619048663</updated>
+    </task>
+    <servers />
+  </component>
+</project>
